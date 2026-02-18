@@ -12,9 +12,6 @@ import pandas as pd
 import argparse
 import fnmatch
 from skimage import io as skio
-import rasterio
-cv2.utils.logging.setLogLevel(cv2.utils.logging.LOG_LEVEL_ERROR)
-import time
 
 def _to_gray_float(arr):
     """Return single-channel float32 image (avg RGB if multi-band)."""
@@ -27,24 +24,17 @@ def _to_gray_float(arr):
     return arr[..., 0].astype(np.float32, copy=False)
 
 def _process_one(nodem_path, mask_path, index_prefix, rows):
-
     # date from folder name two levels up: <date>_...
     date_component = os.path.basename(os.path.dirname(os.path.dirname(nodem_path))).split('_')[0]
     image_id = os.path.basename(nodem_path)
 
     nodem = None
     mask = None
-
     try:
-        with rasterio.open(nodem_path) as src:
-            nodem = src.read(1).astype(np.float32)
-            nodem_nodata = src.nodata
-            if nodem_nodata is not None:
-                nodem[nodem == nodem_nodata] = np.nan  # convert NoData to nan
+        nodem = skio.imread(nodem_path, plugin='tifffile')
     except Exception as e:
         print(f"[WARN] read nodem failed: {nodem_path} ({e})")
         return
-
     mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
     if mask is None:
         print(f"[WARN] missing mask: {mask_path}")
@@ -58,31 +48,20 @@ def _process_one(nodem_path, mask_path, index_prefix, rows):
     gray = gray[:h, :w]
     mask = mask[:h, :w]
 
-    # apply mask safely
-    vals = gray[mask > 0]  # only pixels where mask > 0
-    vals = vals[~np.isnan(vals)]  # remove nodata pixels
-
-    # check for empty array to avoid warnings
+    # simple mask apply
+    vals = np.where(mask > 0, gray, np.nan).ravel()
+    vals = vals[~np.isnan(vals)]
     if vals.size == 0:
         mean_v, std_v = np.nan, np.nan
     else:
-        mean_v = float(np.nanmean(vals.astype(np.float64)))  # convert to float64 only for stats
-        std_v  = float(np.nanstd(vals.astype(np.float64)))
-
-    if vals.size == 0:
-        mean_v, std_v = np.nan, np.nan
-        print(f"[WARN] No valid pixels in {nodem_path} with mask {mask_path}")
-
-    else:
-        mean_v = float(np.nanmean(vals))
-        std_v  = float(np.nanstd(vals))
+        mean_v = float(np.mean(vals))
+        std_v  = float(np.std(vals))
 
     key = (date_component, image_id)
     if key not in rows:
         rows[key] = {'Date': date_component, 'Image ID': image_id}
     rows[key][f'{index_prefix}_Average'] = mean_v
     rows[key][f'{index_prefix}_StdDev'] = std_v
-    print(f"done with nodem_path {nodem_path}")
 
 def trait_extract_nodem(ipath, mask_subdir="masks_overlapping"):
     out_dir = os.path.join(ipath, "nodem_trait")

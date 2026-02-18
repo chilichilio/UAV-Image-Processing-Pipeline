@@ -1,9 +1,6 @@
 from qgis.core import *
 from qgis.utils import *
-# from PyQt5.QtCore import *
-# for new version QGIS
-from qgis.PyQt.QtCore import *
-
+from PyQt5.QtCore import *
 from qgis.analysis import *
 from qgis.gui import *
 import numpy as np
